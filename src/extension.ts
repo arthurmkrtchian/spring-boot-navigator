@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('--- Spring Bean Navigator (Stable + Smart Nav) ACTIVE ---');
+    console.log('--- Spring Bean Navigator (Lint Fixed) ACTIVE ---');
 
     const beanPath = vscode.Uri.file(context.asAbsolutePath('images/bean.svg'));
     const injectPath = vscode.Uri.file(context.asAbsolutePath('images/inject.svg'));
@@ -18,7 +18,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     const showUsagesCmd = vscode.commands.registerCommand('springNav.showUsages', async (uri: vscode.Uri, line: number) => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) {
+            return;
+        }
 
         const pos = new vscode.Position(line, 0);
         editor.selection = new vscode.Selection(pos, pos);
@@ -45,11 +47,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     const navigateToBeanCmd = vscode.commands.registerCommand('springNav.navigateToBean', async (uri: vscode.Uri, line: number) => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) {
+            return;
+        }
 
         const lineText = editor.document.lineAt(line).text;
         
-
         const typeRegex = /(?:private|protected|public|static|final|transient|@\w+|\s)*([\w<>]+)\s+\w+/;
         
         let match = lineText.match(typeRegex);
@@ -58,7 +61,9 @@ export function activate(context: vscode.ExtensionContext) {
         if (!match && line + 1 < editor.document.lineCount) {
              const nextLineText = editor.document.lineAt(line + 1).text;
              match = nextLineText.match(typeRegex);
-             if (match) targetLine = line + 1;
+             if (match) {
+                 targetLine = line + 1;
+             }
         }
 
         if (!match || !match[1]) {
@@ -66,7 +71,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const typeName = match[1]; 
+        const typeName = match[1];
         
         const currentLineText = editor.document.lineAt(targetLine).text;
         const typeIndex = currentLineText.indexOf(typeName);
@@ -104,7 +109,9 @@ export function activate(context: vscode.ExtensionContext) {
     let activeEditor = vscode.window.activeTextEditor;
 
     function updateDecorations() {
-        if (!activeEditor) return;
+        if (!activeEditor) {
+            return;
+        }
         const text = activeEditor.document.getText();
         const beans: vscode.DecorationOptions[] = [];
         const injects: vscode.DecorationOptions[] = [];
@@ -140,9 +147,10 @@ export function activate(context: vscode.ExtensionContext) {
             const lombokFieldRegex = /(?:private|protected|public)?\s*final\s+([\w<>]+)\s+(\w+)\s*;/g;
             
             while ((match = lombokFieldRegex.exec(text))) {
-                // Проверяем, нет ли слова static перед final (костыль для regex, но рабочий)
                 const fullMatchStart = match.index > 10 ? text.substring(match.index - 10, match.index) : "";
-                if (fullMatchStart.includes("static")) continue;
+                if (fullMatchStart.includes("static")) {
+                    continue;
+                }
 
                 const startPos = activeEditor.document.positionAt(match.index);
                 const endPos = activeEditor.document.positionAt(match.index + match[0].length);
@@ -169,11 +177,15 @@ export function activate(context: vscode.ExtensionContext) {
         timeout = setTimeout(updateDecorations, 500);
     }
 
-    if (activeEditor) triggerUpdateDecorations();
+    if (activeEditor) {
+        triggerUpdateDecorations();
+    }
 
     vscode.window.onDidChangeActiveTextEditor(editor => {
         activeEditor = editor;
-        if (editor) triggerUpdateDecorations();
+        if (editor) {
+            triggerUpdateDecorations();
+        }
     }, null, context.subscriptions);
 
     vscode.workspace.onDidChangeTextDocument(event => {
