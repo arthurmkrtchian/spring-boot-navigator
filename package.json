@@ -1,16 +1,23 @@
 {
-  "name": "spring-bean-navigator",
+  "name": "java-spring-bean-navigator",
   "displayName": "Spring Bean Navigator",
   "description": "Maps through Spring Beans and Injections like in IntelliJ IDEA",
   "icon": "images/icon.png",
   "version": "0.0.1",
+  "publisher": "ArthurMkrtchian",
   "engines": {
     "vscode": "^1.75.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arthurmkrtchian/spring-boot-navigator"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [ "onLanguage:java" ],
+  "activationEvents": [
+    "onLanguage:java"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -39,7 +46,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.107.0",
+    "@types/vscode": "^1.75.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "typescript-eslint": "^8.48.1",

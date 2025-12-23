@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('--- Spring Bean Navigator (Optimized & Debounced) ACTIVE ---');
+    console.log('--- Spring Bean Navigator (Stable + Smart Nav) ACTIVE ---');
 
     const beanPath = vscode.Uri.file(context.asAbsolutePath('images/bean.svg'));
     const injectPath = vscode.Uri.file(context.asAbsolutePath('images/inject.svg'));
@@ -16,68 +16,90 @@ export function activate(context: vscode.ExtensionContext) {
         gutterIconSize: 'contain'
     });
 
-
-    const findUsagesCmd = vscode.commands.registerCommand('springNav.showUsages', async (uri: vscode.Uri, line: number) => {
+    const showUsagesCmd = vscode.commands.registerCommand('springNav.showUsages', async (uri: vscode.Uri, line: number) => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
         const pos = new vscode.Position(line, 0);
         editor.selection = new vscode.Selection(pos, pos);
-        
+
         const nextLineIndex = line + 1;
         if (nextLineIndex < editor.document.lineCount) {
              const nextLine = editor.document.lineAt(nextLineIndex);
-             const classMatch = nextLine.text.match(/class\s+(\w+)/);
+             const classMatch = nextLine.text.match(/(?:class|interface)\s+(\w+)/);
              if (classMatch) {
                  const nameIndex = nextLine.text.indexOf(classMatch[1]);
                  const namePos = new vscode.Position(nextLineIndex, nameIndex);
                  editor.selection = new vscode.Selection(namePos, namePos);
+             } else {
+                 const methodMatch = nextLine.text.match(/\s+\w+\s+(\w+)\(/);
+                 if (methodMatch) {
+                     const nameIndex = nextLine.text.indexOf(methodMatch[1]);
+                     const namePos = new vscode.Position(nextLineIndex, nameIndex);
+                     editor.selection = new vscode.Selection(namePos, namePos);
+                 }
              }
         }
         await vscode.commands.executeCommand('editor.action.referenceSearch.trigger');
     });
 
-    const goToDefCmd = vscode.commands.registerCommand('springNav.goToDef', async (uri: vscode.Uri, line: number) => {
+    const navigateToBeanCmd = vscode.commands.registerCommand('springNav.navigateToBean', async (uri: vscode.Uri, line: number) => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
         const lineText = editor.document.lineAt(line).text;
-        const strictRegex = /(?:public|protected|private|static|final|transient|volatile|@\w+|\s)*([\w<>]+)\s+\w+/;
         
-        let match = lineText.match(strictRegex);
+
+        const typeRegex = /(?:private|protected|public|static|final|transient|@\w+|\s)*([\w<>]+)\s+\w+/;
+        
+        let match = lineText.match(typeRegex);
         let targetLine = line;
 
         if (!match && line + 1 < editor.document.lineCount) {
              const nextLineText = editor.document.lineAt(line + 1).text;
-             match = nextLineText.match(strictRegex);
-             if (match) { targetLine = line + 1; }
+             match = nextLineText.match(typeRegex);
+             if (match) targetLine = line + 1;
         }
 
-        let targetPos = new vscode.Position(targetLine, 0);
+        if (!match || !match[1]) {
+            await vscode.commands.executeCommand('editor.action.revealDefinition');
+            return;
+        }
 
-        if (match && match[1]) {
-            const typeName = match[1];
-            const typeIndex = editor.document.lineAt(targetLine).text.indexOf(typeName);
-            if (typeIndex !== -1) {
-                targetPos = new vscode.Position(targetLine, typeIndex);
+        const typeName = match[1]; 
+        
+        const currentLineText = editor.document.lineAt(targetLine).text;
+        const typeIndex = currentLineText.indexOf(typeName);
+        const pos = new vscode.Position(targetLine, typeIndex !== -1 ? typeIndex : 0);
+        editor.selection = new vscode.Selection(pos, pos);
+
+        try {
+            const implementations = await vscode.commands.executeCommand<vscode.Location[]>(
+                'vscode.executeImplementationProvider',
+                uri,
+                pos
+            );
+
+            if (implementations && implementations.length > 0) {
+                if (implementations.length === 1) {
+                    const loc = implementations[0];
+                    const doc = await vscode.workspace.openTextDocument(loc.uri);
+                    const e = await vscode.window.showTextDocument(doc);
+                    e.selection = new vscode.Selection(loc.range.start, loc.range.start);
+                    e.revealRange(loc.range);
+                } else {
+                    await vscode.commands.executeCommand('editor.action.showReferences', uri, pos, implementations);
+                }
+                return;
             }
-        } else {
-             const words = editor.document.lineAt(targetLine).text.trim().split(/\s+/);
-             for (const word of words) {
-                 if (/^[A-Z]/.test(word) && !word.startsWith('@')) {
-                     const idx = editor.document.lineAt(targetLine).text.indexOf(word);
-                     targetPos = new vscode.Position(targetLine, idx);
-                     break;
-                 }
-             }
+        } catch (e) {
+            console.log("Implementation search failed, fallback to definition");
         }
 
-        editor.selection = new vscode.Selection(targetPos, targetPos);
         await vscode.commands.executeCommand('editor.action.revealDefinition');
     });
 
-    context.subscriptions.push(findUsagesCmd, goToDefCmd);
-
+    context.subscriptions.push(showUsagesCmd, navigateToBeanCmd);
 
     let activeEditor = vscode.window.activeTextEditor;
 
@@ -107,25 +129,27 @@ export function activate(context: vscode.ExtensionContext) {
             const endPos = activeEditor.document.positionAt(match.index + match[0].length);
 
             const args = [activeEditor.document.uri, startPos.line];
-            const commandUri = vscode.Uri.parse(`command:springNav.goToDef?${encodeURIComponent(JSON.stringify(args))}`);
-            const markdown = new vscode.MarkdownString(`**Injection**: [Go to Bean](${commandUri})`);
+            const commandUri = vscode.Uri.parse(`command:springNav.navigateToBean?${encodeURIComponent(JSON.stringify(args))}`);
+            const markdown = new vscode.MarkdownString(`**Injection**: [Go to Implementation](${commandUri})`);
             markdown.isTrusted = true;
 
             injects.push({ range: new vscode.Range(startPos, endPos), hoverMessage: markdown });
         }
 
-        if (text.includes('@RequiredArgsConstructor')) {
-            const lombokFieldRegex = /(?:public|protected|private)?\s*final\s+([\w<>]+)\s+(\w+)\s*;/g;
+        if (text.includes('@RequiredArgsConstructor') || text.includes('@AllArgsConstructor')) {
+            const lombokFieldRegex = /(?:private|protected|public)?\s*final\s+([\w<>]+)\s+(\w+)\s*;/g;
+            
             while ((match = lombokFieldRegex.exec(text))) {
-                const fullMatchStart = match.index > 0 ? text.substring(match.index - 7, match.index) : "";
+                // Проверяем, нет ли слова static перед final (костыль для regex, но рабочий)
+                const fullMatchStart = match.index > 10 ? text.substring(match.index - 10, match.index) : "";
                 if (fullMatchStart.includes("static")) continue;
 
                 const startPos = activeEditor.document.positionAt(match.index);
                 const endPos = activeEditor.document.positionAt(match.index + match[0].length);
 
                 const args = [activeEditor.document.uri, startPos.line];
-                const commandUri = vscode.Uri.parse(`command:springNav.goToDef?${encodeURIComponent(JSON.stringify(args))}`);
-                const markdown = new vscode.MarkdownString(`**Lombok Injection**: [Go to Bean](${commandUri})`);
+                const commandUri = vscode.Uri.parse(`command:springNav.navigateToBean?${encodeURIComponent(JSON.stringify(args))}`);
+                const markdown = new vscode.MarkdownString(`**Lombok Injection**: [Go to Implementation](${commandUri})`);
                 markdown.isTrusted = true;
 
                 injects.push({ range: new vscode.Range(startPos, endPos), hoverMessage: markdown });
@@ -137,7 +161,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     let timeout: NodeJS.Timeout | undefined = undefined;
-
     function triggerUpdateDecorations() {
         if (timeout) {
             clearTimeout(timeout);
@@ -148,7 +171,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (activeEditor) triggerUpdateDecorations();
 
-    // Слушатели событий
     vscode.window.onDidChangeActiveTextEditor(editor => {
         activeEditor = editor;
         if (editor) triggerUpdateDecorations();
@@ -156,7 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.workspace.onDidChangeTextDocument(event => {
         if (activeEditor && event.document === activeEditor.document) {
-            triggerUpdateDecorations(); // Вызываем оптимизированную версию
+            triggerUpdateDecorations();
         }
     }, null, context.subscriptions);
 }
