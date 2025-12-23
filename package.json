@@ -3,7 +3,7 @@
   "displayName": "Java Spring Bean Navigator",
   "description": "Maps through Spring Beans and Injections like in IntelliJ IDEA",
   "icon": "images/icon.png",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "ArthurMkrtchian",
   "engines": {
     "vscode": "^1.75.0"
