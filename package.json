@@ -1,6 +1,6 @@
 {
   "name": "java-spring-bean-navigator",
-  "displayName": "Spring Bean Navigator",
+  "displayName": "Java Spring Bean Navigator",
   "description": "Maps through Spring Beans and Injections like in IntelliJ IDEA",
   "icon": "images/icon.png",
   "version": "0.0.1",
