@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('--- Spring Bean Navigator (Field Filter Fix) ACTIVE ---');
+    console.log('--- Spring Bean Navigator (Case-Insensitive Sort) ACTIVE ---');
 
     const beanPath = vscode.Uri.file(context.asAbsolutePath('images/bean.svg'));
     const injectPath = vscode.Uri.file(context.asAbsolutePath('images/inject.svg'));
@@ -43,63 +43,58 @@ export function activate(context: vscode.ExtensionContext) {
 
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: `Scanning injection points for ${typeName}...`,
+            title: `Scanning ${refs.length} usages for ${typeName}...`,
             cancellable: true
         }, async (progress, token) => {
             
-            for (const ref of refs!) {
+            const chunkSize = 20;
+            for (let i = 0; i < refs!.length; i += chunkSize) {
                 if (token.isCancellationRequested) break;
-
-                if (ref.uri.fsPath === uri.fsPath && Math.abs(ref.range.start.line - line) < 2) continue;
-
-                const refDoc = await vscode.workspace.openTextDocument(ref.uri);
-                const refLineIdx = ref.range.start.line;
-                const refLineText = refDoc.lineAt(refLineIdx).text.trim();
+                const chunk = refs!.slice(i, i + chunkSize);
                 
-                const startContextLine = Math.max(0, refLineIdx - 2);
-                const contextRange = new vscode.Range(startContextLine, 0, refLineIdx + 1, 999);
-                const contextText = refDoc.getText(contextRange);
+                await Promise.all(chunk.map(async (ref) => {
+                    if (ref.uri.fsPath === uri.fsPath && Math.abs(ref.range.start.line - line) < 2) return;
 
-                const isFieldDeclaration = /^(private|protected|public).*;$/.test(refLineText);
+                    const refDoc = await vscode.workspace.openTextDocument(ref.uri);
+                    const refLineIdx = ref.range.start.line;
+                    const refLineText = refDoc.lineAt(refLineIdx).text.trim();
+                    
+                    const startContextLine = Math.max(0, refLineIdx - 2);
+                    const contextRange = new vscode.Range(startContextLine, 0, refLineIdx + 1, 999);
+                    const contextText = refDoc.getText(contextRange);
 
-                if (isFieldDeclaration) {
-                    const hasInjectionAnnotation = /@Autowired|@Inject|@Resource|@Value/.test(contextText);
-                    const hasQualifierOnField = contextText.includes("@Qualifier");
-
-                    if (!hasInjectionAnnotation && !hasQualifierOnField) {
-                        const headerText = refDoc.getText(new vscode.Range(0, 0, 30, 0));
-                        const hasLombok = /@RequiredArgsConstructor|@AllArgsConstructor/.test(headerText);
-
-                        if (!hasLombok) {
-                            continue;
+                    const isFieldDeclaration = /^(private|protected|public).*;$/.test(refLineText);
+                    if (isFieldDeclaration) {
+                        const hasInjectionAnnotation = /@Autowired|@Inject|@Resource|@Value/.test(contextText);
+                        const hasQualifierOnField = contextText.includes("@Qualifier"); 
+                        
+                        if (!hasInjectionAnnotation && !hasQualifierOnField) {
+                            const headerText = refDoc.getText(new vscode.Range(0, 0, 20, 0));
+                            const hasLombok = /@RequiredArgsConstructor|@AllArgsConstructor/.test(headerText);
+                            if (!hasLombok) return; 
                         }
                     }
-                }
 
-                const injectionHasQualifier = contextText.includes("@Qualifier");
-                
-                let injectionQualifierValue: string | undefined;
-                if (injectionHasQualifier) {
-                    const match = contextText.match(/@Qualifier\s*\(\s*"([^"]+)"\s*\)/);
-                    if (match) injectionQualifierValue = match[1];
-                }
+                    const injectionHasQualifier = contextText.includes("@Qualifier");
+                    let injectionQualifierValue: string | undefined;
+                    if (injectionHasQualifier) {
+                        const match = contextText.match(/@Qualifier\s*\(\s*"([^"]+)"\s*\)/);
+                        if (match) injectionQualifierValue = match[1];
+                    }
 
-                if (beanQualifier) {
-                    if (injectionQualifierValue === beanQualifier) {
-                        filteredRefs.push(ref);
+                    if (beanQualifier) {
+                        if (injectionQualifierValue === beanQualifier) filteredRefs.push(ref);
+                    } else {
+                        if (!injectionHasQualifier) filteredRefs.push(ref);
                     }
-                } else {
-                    if (!injectionHasQualifier) {
-                        filteredRefs.push(ref);
-                    }
-                }
+                }));
             }
         });
 
         if (filteredRefs.length > 0) {
             await vscode.commands.executeCommand('editor.action.showReferences', uri, pos, filteredRefs);
         } else {
-            vscode.window.showInformationMessage(`No active injection points found for ${isPrimary ? '@Primary ' : ''}bean ${typeName}${beanQualifier ? ' with @Qualifier("' + beanQualifier + '")' : ''}.`);
+            vscode.window.showInformationMessage(`No matching injection points found for ${isPrimary ? '@Primary ' : ''}bean ${typeName}${beanQualifier ? ' with @Qualifier("' + beanQualifier + '")' : ''}.`);
         }
     });
 
@@ -375,12 +370,16 @@ export function activate(context: vscode.ExtensionContext) {
             const pos = new vscode.Position(definitionLine, classIndex !== -1 ? classIndex : 0);
             const refs = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', uri, pos);
             if (refs && refs.length > 0) {
+                
                 refs.sort((a, b) => {
-                    const aScore = (a.uri.path.includes("Config") || a.uri.path.includes("App")) ? 1 : 0;
-                    const bScore = (b.uri.path.includes("Config") || b.uri.path.includes("App")) ? 1 : 0;
+                    const pathA = a.uri.path.toLowerCase();
+                    const pathB = b.uri.path.toLowerCase();
+                    const aScore = (pathA.includes("config") || pathA.includes("conf") || pathA.includes("app") || pathA.includes("application")) ? 1 : 0;
+                    const bScore = (pathB.includes("config") || pathB.includes("conf") || pathB.includes("app") || pathB.includes("application")) ? 1 : 0;
                     return bScore - aScore;
                 });
-                for (const ref of refs.slice(0, 50)) {
+
+                for (const ref of refs.slice(0, 500)) {
                     if (ref.uri.fsPath === uri.fsPath) continue;
                     const refDoc = await vscode.workspace.openTextDocument(ref.uri);
                     const range = new vscode.Range(Math.max(0, ref.range.start.line - 5), 0, ref.range.start.line + 1, 999);
@@ -396,7 +395,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
         } catch (e) { }
-        const configFiles = await vscode.workspace.findFiles('**/*{Config,Configuration,Application}.java', '**/node_modules/**', 10);
+        const configFiles = await vscode.workspace.findFiles('**/*{Config,Configuration,Application}.java', '**/node_modules/**', 15);
         let manualCandidate: vscode.Location | null = null;
         for (const fileUri of configFiles) {
             const fileDoc = await vscode.workspace.openTextDocument(fileUri);
